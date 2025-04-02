@@ -1,0 +1,16 @@
+{
+    "name": "CyberSec Toolkit",
+    "version": "1.0",
+    "homepage": "https://github.com/ERE332/esp32-flasher",
+    "builds": [
+        {
+            "chipFamily": "ESP32-S3",
+            "parts": [
+                {
+                    "path": "firmware.bin",
+                    "offset": 0
+                }
+            ]
+        }
+    ]
+}
