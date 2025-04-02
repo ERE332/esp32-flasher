@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ESP32-S3 CyberSec Flasher</title>
+    <script src="https://unpkg.com/@espruino-tools/web-installer@0.0.8/dist/esp-web-installer.umd.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #00ff00;
+        }
+        .container {
+            border: 2px solid #00ff00;
+            padding: 20px;
+            border-radius: 10px;
+        }
+        h1 {
+            color: #00ff00;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>CyberSec ESP32-S3 Flasher</h1>
+        <esp-web-installer manifest="manifest.json"></esp-web-installer>
+    </div>
+    
+    <script>
+        const installer = document.querySelector('esp-web-installer');
+        installer.addEventListener('state-changed', (event) => {
+            console.log('Status:', event.detail.state);
+        });
+    </script>
+</body>
+</html>
